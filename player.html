@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Player Fliix - Brazuca Torrents</title>
+  <script src="https://cdn.jsdelivr.net/npm/webtorrent@latest/webtorrent.min.js"></script>
+  <style>
+    body { margin:0; background:#000; color:#fff; font-family:Arial; text-align:center; padding:20px; }
+    h1 { font-size:24px; margin:10px; }
+    #player { width:100%; max-width:1000px; background:#000; }
+    .streams { display:flex; flex-wrap:wrap; gap:12px; justify-content:center; margin:20px; }
+    .btn { padding:15px; background:#111; border:2px solid #444; border-radius:8px; min-width:300px; cursor:pointer; color:#fff; font-size:14px; }
+    .btn:hover { background:#222; border-color:#0ff; }
+    .best { border-color:#0f0; background:#020; }
+    .progress, .loading { font-size:18px; margin:20px; color:#0f0; }
+    .error { color:#f66; }
+    .close { position:fixed; top:10px; right:20px; font-size:40px; cursor:pointer; z-index:10; }
+  </style>
+</head>
+<body>
+  <div class="close" onclick="window.close()">&times;</div>
+  <h1 id="t">Carregando...</h1>
+  <video id="player" controls autoplay></video>
+  <div id="loading" class="loading">Buscando streams dublados PT-BR...</div>
+  <div id="streams" class="streams"></div>
+  <div id="progress" class="progress"></div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const type = params.get('type') || 'movie';
+    const id = params.get('id') || '';
+    const title = decodeURIComponent(params.get('title') || 'Conteúdo');
+    document.getElementById('t').textContent = title;
+
+    // Endpoint do addon Brazuca (como no Stremio)
+    const ADDON_URL = 'https://94c8cb9f702d-brazuca-torrents.baby-beamup.club/stream';
+
+    async function load() {
+      if (!id) return document.getElementById('loading').innerHTML = '<span class="error">ID faltando na URL</span>';
+      try {
+        const r = await fetch(ADDON_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, id, extra: [] })
+        });
+        if (!r.ok) throw new Error(`Erro ${r.status}`);
+        const data = await r.json();
+        if (!data.streams || data.streams.length === 0) {
+          document.getElementById('loading').innerHTML = '<span class="error">Nenhum stream encontrado (filme novo ou sem seeds). Teste com tt0111161.</span>';
+          return;
+        }
+        document.getElementById('loading').style.display = 'none';
+        show(data.streams);
+      } catch (e) {
+        document.getElementById('loading').innerHTML = `<span class="error">Erro de conexão: ${e.message}. Addon pode estar lento.</span>`;
+      }
+    }
+
+    function show(s) {
+      // Ordena: dublado/dual/PT-BR > 1080p > resto (como no Stremio)
+      s.sort((a, b) => {
+        const ta = (a.title || '').toLowerCase();
+        const tb = (b.title || '').toLowerCase();
+        const score = str => (/dublad|dual|pt.br|portugu/gi.test(str) ? 10 : /1080/.test(str) ? 5 : 0);
+        return score(tb) - score(ta);
+      });
+      s.forEach((st, i) => {
+        const b = document.createElement('button');
+        b.className = 'btn' + (i === 0 ? ' best' : '');
+        b.innerHTML = (st.title || 'Stream').replace(/\n/g, '<br>')
+          .replace(/dublad|dual|pt.br|portugu/gi, '<b style="color:#0f0">$&</b>');
+        b.onclick = () => play(st.url);
+        document.getElementById('streams').appendChild(b);
+      });
+      // Auto-play no melhor (como no Stremio)
+      if (s[0]?.url) {
+        document.getElementById('progress').textContent = 'Iniciando melhor stream dublado...';
+        setTimeout(() => play(s[0].url), 1000);
+      }
+    }
+
+    function play(m) {
+      if (window.c) window.c.destroy();
+      document.getElementById('progress').textContent = 'Conectando aos peers...';
+      document.getElementById('streams').innerHTML = '';
+      window.c = new WebTorrent();
+      c.add(m, t => {
+        const f = t.files.find(x => /\.(mp4|mkv|webm|avi)$/i.test(x.name)) || t.files[0];
+        if (!f) return document.getElementById('progress').innerHTML = '<span class="error">Sem arquivo de vídeo</span>';
+        f.renderTo('#player', { autoplay: true });
+        setInterval(() => {
+          document.getElementById('progress').innerHTML = `Baixando: ${(t.progress * 100).toFixed(1)}% ↓ ${(t.downloadSpeed / 1024 / 1024).toFixed(1)} MB/s Peers: ${t.numPeers}`;
+        }, 1000);
+      });
+      c.on('error', e => document.getElementById('progress').innerHTML = `<span class="error">Erro torrent: ${e.message}</span>`);
+    }
+
+    load();
+  </script>
+</body>
+</html>
